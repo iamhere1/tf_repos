@@ -37,7 +37,7 @@ tf.app.flags.DEFINE_string("ps_hosts", '', "Comma-separated list of hostname:por
 tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname:port pairs")
 tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
-tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
+tf.app.flags.DEFINE_integer("num_threads", 4, "Number of threads")
 tf.app.flags.DEFINE_integer("feature_size", 0, "Number of features")
 tf.app.flags.DEFINE_integer("field_size", 0, "Number of fields")
 tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, 
 tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
 tf.app.flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
 tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normaization (True or False)")
-tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
+tf.app.flags.DEFINE_float("batch_norm_decay", 0.95, "decay for the moving average(recommend trying decay=0.95)")
 tf.app.flags.DEFINE_string("data_dir", '', "data dir")
 tf.app.flags.DEFINE_string("dt_dir", '', "data dt partition")
 tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
@@ -81,20 +81,23 @@ def input_fn(filenames, batch_size=32, num_epochs=1, perform_shuffle=False):
         return {"feat_ids": feat_ids, "feat_vals": feat_vals}, labels
 
     # Extract lines from input files using the Dataset API, can pass one filename or filename list
-    dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=10).prefetch(500000)    # multi-thread pre-process then prefetch
+    #dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=4).prefetch(1000)    # multi-thread pre-process then prefetch
+    dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=4).prefetch(1000)    # multi-thread pre-process then prefetch
 
     # Randomizes input using a window of 256 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=256)
+        dataset = dataset.shuffle(buffer_size=10000)
 
     # epochs from blending together.
     dataset = dataset.repeat(num_epochs)
+    #dataset = dataset.padded_batch(batch_size, padded_shapes=([None],[None]), padding_values=0) # Batch size to use
     dataset = dataset.batch(batch_size) # Batch size to use
-
-    #return dataset.make_one_shot_iterator()
+#    #return dataset.make_one_shot_iterator()
     iterator = dataset.make_one_shot_iterator()
     batch_features, batch_labels = iterator.get_next()
     #return tf.reshape(batch_ids,shape=[-1,field_size]), tf.reshape(batch_vals,shape=[-1,field_size]), batch_labels
+    #sess=tf.Session()
+    #print sess.run([batch_labels, batch_features])
     return batch_features, batch_labels
 
 def model_fn(features, labels, mode, params):
@@ -117,7 +120,7 @@ def model_fn(features, labels, mode, params):
 
     #------build feaure-------
     feat_ids  = features['feat_ids']
-    feat_ids = tf.reshape(feat_ids,shape=[-1,field_size])
+    feat_ids = tf.reshape(feat_ids,shape=[-1,field_size]) #incorrect for multi hot encoding
     feat_vals = features['feat_vals']
     feat_vals = tf.reshape(feat_vals,shape=[-1,field_size])
 
@@ -185,7 +188,7 @@ def model_fn(features, labels, mode, params):
                 export_outputs=export_outputs)
 
     #------bulid loss------
-    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
+    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=labels)) + \
         l2_reg * tf.nn.l2_loss(FM_W) + \
         l2_reg * tf.nn.l2_loss(FM_V) #+ \ l2_reg * tf.nn.l2_loss(sig_wgts)
 
@@ -315,8 +318,8 @@ def main(_):
     DeepFM = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir, params=model_params, config=config)
 
     if FLAGS.task_type == 'train':
-        train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn(tr_files, num_epochs=FLAGS.num_epochs, batch_size=FLAGS.batch_size))
-        eval_spec = tf.estimator.EvalSpec(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size), steps=None, start_delay_secs=1000, throttle_secs=1200)
+        train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn(tr_files, num_epochs=FLAGS.num_epochs, batch_size=FLAGS.batch_size), max_steps=100000)
+        eval_spec = tf.estimator.EvalSpec(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size), steps=None, start_delay_secs=600, throttle_secs=600)
         tf.estimator.train_and_evaluate(DeepFM, train_spec, eval_spec)
     elif FLAGS.task_type == 'eval':
         DeepFM.evaluate(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size))
@@ -363,6 +366,5 @@ if __name__ == "__main__":
     print('batch_norm_decay ', FLAGS.batch_norm_decay)
     print('batch_norm ', FLAGS.batch_norm)
     print('l2_reg ', FLAGS.l2_reg)
-
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.app.run()

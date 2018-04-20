@@ -88,6 +88,8 @@ class ContinuousFeatureGenerator:
         if val == '':
             return 0.0
         val = float(val)
+        if (val > continous_clip[idx]):
+            val = continous_clip[idx]
         return (val - self.min[idx]) / (self.max[idx] - self.min[idx])
 
 
@@ -199,4 +201,4 @@ if __name__ == "__main__":
     print('output_dir ', FLAGS.output_dir)
     print('cutoff ', FLAGS.cutoff)
 
-    preprocess(FLAGS.input_dir, FLAGS.output_dir)
+preprocess(FLAGS.input_dir, FLAGS.output_dir)
