@@ -82,16 +82,16 @@ def input_fn(filenames, batch_size=32, num_epochs=1, perform_shuffle=False):
 
     # Extract lines from input files using the Dataset API, can pass one filename or filename list
     #dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=4).prefetch(1000)    # multi-thread pre-process then prefetch
-    dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=4).prefetch(1000)    # multi-thread pre-process then prefetch
+    dataset = tf.data.TextLineDataset(filenames).map(decode_libsvm, num_parallel_calls=4)    # multi-thread pre-process then prefetch
 
     # Randomizes input using a window of 256 elements (read into memory)
     if perform_shuffle:
-        dataset = dataset.shuffle(buffer_size=10000)
+        dataset = dataset.shuffle(buffer_size=1000)
 
     # epochs from blending together.
     dataset = dataset.repeat(num_epochs)
     #dataset = dataset.padded_batch(batch_size, padded_shapes=([None],[None]), padding_values=0) # Batch size to use
-    dataset = dataset.batch(batch_size) # Batch size to use
+    dataset = dataset.batch(batch_size).prefetch(1000) # Batch size to use
 #    #return dataset.make_one_shot_iterator()
     iterator = dataset.make_one_shot_iterator()
     batch_features, batch_labels = iterator.get_next()
@@ -188,7 +188,7 @@ def model_fn(features, labels, mode, params):
                 export_outputs=export_outputs)
 
     #------bulid loss------
-    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=pred, labels=labels)) + \
+    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
         l2_reg * tf.nn.l2_loss(FM_W) + \
         l2_reg * tf.nn.l2_loss(FM_V) #+ \ l2_reg * tf.nn.l2_loss(sig_wgts)
 
@@ -319,7 +319,7 @@ def main(_):
 
     if FLAGS.task_type == 'train':
         train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn(tr_files, num_epochs=FLAGS.num_epochs, batch_size=FLAGS.batch_size), max_steps=100000)
-        eval_spec = tf.estimator.EvalSpec(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size), steps=None, start_delay_secs=600, throttle_secs=600)
+        eval_spec = tf.estimator.EvalSpec(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size), steps=None, start_delay_secs=120, throttle_secs=120)
         tf.estimator.train_and_evaluate(DeepFM, train_spec, eval_spec)
     elif FLAGS.task_type == 'eval':
         DeepFM.evaluate(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size))
